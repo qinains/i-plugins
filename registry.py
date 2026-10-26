@@ -9,6 +9,8 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -155,12 +157,48 @@ def manifest_validate(manifest, entry, module):
         schema_validate(tool["parameters"])
 
 
+def check_directory(data):
+    def number(at, width):
+        require(0 <= at and at + width <= len(data), "truncated ZIP directory")
+        return int.from_bytes(data[at:at + width], "little")
+
+    require(len(data) >= 22, "truncated ZIP")
+    end = len(data) - 22
+    require(data[end:end + 4] == b"PK\x05\x06" and number(end + 20, 2) == 0,
+            "ZIP comments and ZIP64 are not supported")
+    require(number(end + 4, 2) == number(end + 6, 2) == 0 and
+            number(end + 8, 2) == number(end + 10, 2) == 3, "ZIP must contain three files on one disk")
+    start, size = number(end + 16, 4), number(end + 12, 4)
+    require(start + size == end, "invalid ZIP directory extent or ZIP64")
+    pos, names, offsets = start, set(), []
+    for _ in range(3):
+        require(data[pos:pos + 4] == b"PK\x01\x02", "invalid ZIP central entry")
+        n, extra, comment = number(pos + 28, 2), number(pos + 30, 2), number(pos + 32, 2)
+        next_pos = pos + 46 + n + extra + comment
+        require(next_pos <= end, "truncated ZIP central entry")
+        name = data[pos + 46:pos + 46 + n]
+        require(name in (b"manifest.json", b"plugin.wasm", b"LICENSE") and name not in names,
+                "unexpected or duplicate ZIP entry")
+        names.add(name)
+        local = number(pos + 42, 4)
+        require(local < start and data[local:local + 4] == b"PK\x03\x04", "invalid ZIP local header")
+        local_n = number(local + 26, 2)
+        require(local + 30 + local_n <= start and data[local + 30:local + 30 + local_n] == name,
+                "ZIP local/central names differ")
+        offsets.append(local)
+        pos = next_pos
+    require(pos == end and min(offsets) == 0, "unexpected ZIP directory data or prefix")
+    return start
+
+
 def package_validate(data, entry):
     package = entry["package"]
     require(type(data) is bytes and len(data) <= MAX_PACKAGE and len(data) == package["size"], "package size mismatch")
     require(hashlib.sha256(data).hexdigest() == package["sha256"], "package digest mismatch")
+    directory_start = check_directory(data)
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            require(archive.start_dir == directory_start, "ZIP archive offset must be zero")
             infos = archive.infolist()
             require(len(infos) == 3 and {i.filename for i in infos} == {"manifest.json", "plugin.wasm", "LICENSE"}, "ZIP must contain exactly manifest.json, plugin.wasm, LICENSE")
             limits = {"manifest.json": 65536, "plugin.wasm": MAX_MODULE, "LICENSE": 256 * 1024}
@@ -223,7 +261,7 @@ def load_entries(root):
     return entries
 
 
-def validate(root, base=None, output=None, downloader=download):
+def validate(root, base=None, output=None, downloader=download, checker=None):
     entries = load_entries(root)
     require(sum(e["package"]["size"] for e in entries) <= 100 * 1024 * 1024, "catalog exceeds 100 MiB")
     if base is not None:
@@ -242,6 +280,17 @@ def validate(root, base=None, output=None, downloader=download):
     for entry in entries:
         data = downloader(entry["package"]["url"])
         package_validate(data, entry)
+        if checker is not None:
+            with tempfile.TemporaryDirectory(prefix="i-plugin-check-") as temp:
+                package_path = Path(temp) / "package.hplugin.zip"
+                package_path.write_bytes(data)
+                try:
+                    result = subprocess.run([str(Path(checker).resolve()), str(package_path)],
+                                            shell=False, timeout=30, check=False,
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except subprocess.TimeoutExpired as error:
+                    raise ValueError("official package checker timed out") from error
+                require(result.returncode == 0, f"official package checker rejected {entry['id']}")
         digest = entry["package"]["sha256"]
         packages[digest] = data
     if output is not None:
@@ -266,9 +315,10 @@ def main():
     parser.add_argument("--extensions", default="extensions")
     parser.add_argument("--base", help="trusted base extensions directory; enforce no deletion, mutation, rollback")
     parser.add_argument("--output", help="build directory, normally dist")
+    parser.add_argument("--checker", help="trusted official i-plugin-check executable (required in publication CI)")
     args = parser.parse_args()
     try:
-        index = validate(args.extensions, args.base, args.output)
+        index = validate(args.extensions, args.base, args.output, checker=args.checker)
     except (ValueError, OSError, KeyError, TypeError, RecursionError, urllib.error.URLError) as error:
         parser.exit(1, f"registry: {error}\n")
     print(f"Validated {len(index['plugins'])} plugins" + (f"; built {args.output}/index.json" if args.output else ""))

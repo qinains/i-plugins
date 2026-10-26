@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: registry-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: registry-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   validate-pr:
@@ -36,8 +36,20 @@ jobs:
           persist-credentials: false
       - name: Test trusted validator
         run: python3 -I -m unittest discover -s trusted -v
+      - name: Check out pinned official package checker source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: qinains/i
+          ref: 71b3db2c3195870ba9ecc3fad2dd2d4c75532e8d # Audited official checker, not plugin source.
+          path: validator-source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.95.0
+      - name: Build official checker (never build submitted plugin source)
+        run: cargo build --manifest-path validator-source/Cargo.toml --locked -p i-wasm-package --features cli --bin i-plugin-check
       - name: Validate all proposed entries and packages using trusted code
-        run: python3 -I trusted/registry.py --extensions submitted/extensions --base trusted/extensions
+        run: python3 -I trusted/registry.py --extensions submitted/extensions --base trusted/extensions --checker "$PWD/validator-source/target/debug/i-plugin-check"
 
   build:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -50,7 +62,19 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 -I -m unittest discover -s . -v
-      - run: python3 -I registry.py --output dist
+      - name: Check out pinned official package checker source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: qinains/i
+          ref: 71b3db2c3195870ba9ecc3fad2dd2d4c75532e8d # Audited official checker, not plugin source.
+          path: validator-source
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec
+        with:
+          toolchain: 1.95.0
+      - name: Build official checker (never build submitted plugin source)
+        run: cargo build --manifest-path validator-source/Cargo.toml --locked -p i-wasm-package --features cli --bin i-plugin-check
+      - run: python3 -I registry.py --output dist --checker "$PWD/validator-source/target/debug/i-plugin-check"
       - name: Upload public catalog and mirrored packages only
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:

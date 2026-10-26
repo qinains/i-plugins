@@ -14,6 +14,14 @@ on GitHub asset hosts may be necessary; submitted URLs cannot contain queries.
 TLS certificate verification remains enabled. ZIPs are read in memory, not
 extracted, and their contents and hashes are checked before publication.
 
+Publication CI additionally runs the official `i-plugin-check` against an inert
+temporary ZIP. The executable is built from a fixed, reviewed `qinains/i` source
+commit, never a contributor-selected plugin repository or revision. It validates
+the real package/module ABI via `inspect_package` without invoking Wasm. Calls
+use an argument array with no shell and a 30-second timeout; nonzero exit or timeout
+stops publication before output is written. Python-only validation without
+`--checker` is a preliminary local check, not the production publication gate.
+
 These checks do not establish that plugin code is benign, that source corresponds
 to its binary, or that an author is trustworthy. Human source/license/permission
 review and host sandboxing are essential. Clients must recheck package integrity,

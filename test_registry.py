@@ -2,6 +2,8 @@ import copy
 import hashlib
 import io
 import json
+import struct
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -171,6 +173,29 @@ class RegistryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registry.package_validate(data, entry)
 
+    def test_strict_zip_comments_prefix_zip64_and_names(self):
+        commented = io.BytesIO(self.data)
+        with zipfile.ZipFile(commented, "a") as archive:
+            archive.comment = b"comment"
+        end = len(self.data) - 22
+        directory_size, directory_start = struct.unpack_from("<LL", self.data, end + 12)
+        zip64_end = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0,
+                                3, 3, directory_size, directory_start)
+        zip64_locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, end, 1)
+        zip64 = self.data[:end] + zip64_end + zip64_locator + self.data[end:]
+        for data in (commented.getvalue(), b"prefix" + self.data, zip64):
+            with self.subTest(size=len(data)):
+                with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                    self.assertEqual(len(archive.infolist()), 3)
+                entry = copy.deepcopy(self.entry)
+                entry["package"].update(size=len(data), sha256=hashlib.sha256(data).hexdigest())
+                with self.assertRaises(ValueError):
+                    registry.package_validate(data, entry)
+        mismatch = bytearray(self.data)
+        mismatch[30] = ord("M")
+        with self.assertRaisesRegex(ValueError, "local/central names differ"):
+            registry.check_directory(bytes(mismatch))
+
     def test_compression_bomb(self):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -224,6 +249,33 @@ class RegistryTests(unittest.TestCase):
             with patch.object(registry, "MAX_INDEX", size - 1), self.assertRaisesRegex(ValueError, "index exceeds"):
                 registry.validate(root / "extensions", downloader=downloader)
             downloader.assert_not_called()
+
+    def test_official_checker_success_uses_inert_tempfile(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.write(root / "extensions")
+            def check(args, **kwargs):
+                self.assertEqual(args[0], str((root / "official-checker").resolve()))
+                self.assertEqual(Path(args[1]).read_bytes(), self.data)
+                self.assertFalse(kwargs["shell"])
+                self.assertEqual(kwargs["timeout"], 30)
+                return Mock(returncode=0)
+            with patch.object(registry.subprocess, "run", side_effect=check) as run:
+                registry.validate(root / "extensions", output=root / "dist",
+                                  downloader=lambda url: self.data, checker=root / "official-checker")
+            self.assertFalse(Path(run.call_args.args[0][1]).exists())
+            self.assertTrue((root / "dist/index.json").is_file())
+
+    def test_official_checker_rejection_and_timeout_block_publication(self):
+        for timeout in (False, True):
+            with self.subTest(timeout=timeout), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self.write(root / "extensions")
+                effect = subprocess.TimeoutExpired("official-checker", 30) if timeout else None
+                with patch.object(registry.subprocess, "run", return_value=Mock(returncode=1), side_effect=effect), self.assertRaisesRegex(ValueError, "official package checker"):
+                    registry.validate(root / "extensions", output=root / "dist",
+                                      downloader=lambda url: self.data, checker=root / "official-checker")
+                self.assertFalse((root / "dist").exists())
 
     def test_catalog_500_entries_and_actual_512k_limit(self):
         with tempfile.TemporaryDirectory() as temp:

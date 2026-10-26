@@ -12,7 +12,8 @@ cross-repository token, server, or database.
 - Initial examples: `example.word-count` (workspace read) and
   `example.json-format` (workspace read/write). Install and grant access explicitly;
   catalog inclusion is not publisher verification or a security guarantee.
-- Python 3.10+; standard library only. No plugin code is executed during validation.
+- Python 3.10+; Python code uses only the standard library. Publication CI also
+  builds the pinned official Rust package checker. No plugin code is executed.
 
 ## Local verification
 
@@ -20,6 +21,8 @@ cross-repository token, server, or database.
 python3 -m unittest -v
 python3 registry.py
 python3 registry.py --output dist
+# Full publication validation with the trusted official checker:
+python3 registry.py --output dist --checker /path/to/i-plugin-check
 # Compare a proposed extensions directory to a trusted checkout:
 python3 registry.py --extensions extensions --base ../trusted/extensions
 ```
@@ -90,7 +93,9 @@ The ZIP must contain exactly three regular, unencrypted files at its root:
 - `plugin.wasm`: at most 8 MiB; version-1 Wasm header; SHA-256 equals manifest `sha256`.
 - `LICENSE`: nonblank UTF-8 text, at most 256 KiB; maintainers review actual license terms.
 
-Only stored/deflated entries are supported; expanded-to-compressed ratio must
+The ZIP must have an unprefixed archive, a final 22-byte EOCD with no comment,
+one disk, exactly three central-directory entries, no ZIP64 directory records,
+and matching local/central filenames. Only stored/deflated entries are supported; expanded-to-compressed ratio must
 not exceed 200:1. No extra files, duplicates, directories, symlinks, or traversal.
 The manifest has `format_version: 1`, `runtime: "harness-wasm-v1"`,
 `entry: "plugin.wasm"`, and exactly matches registered `id`, `name`, `version`,
@@ -98,8 +103,14 @@ and `permissions`. It declares 1..16 unique tools with names matching
 `[a-z][a-z0-9_]{0,31}`, descriptions up to 4096 bytes, and object parameter
 schemas. Supported schema types are object/array/string/integer/number/boolean;
 unknown keywords, invalid bounds, and excessive depth/node count are rejected.
-The host remains the authority for complete argument/schema validation and Wasm
-runtime validation; registry validation does not claim semantic code safety.
+Local Python-only validation checks container, metadata, schema shape, and Wasm
+magic; it is not a substitute for full publication validation. Both CI paths
+require `--checker` pointing to the official `i-plugin-check`, built from an exact
+maintainer-pinned `qinains/i` commit. It calls `inspect_package` without executing
+Wasm, including the host's ABI/module validation. A missing ABI, checker failure,
+or 30-second timeout blocks publication. The checker path cannot be specified by
+plugin metadata. The host remains the final installation/runtime authority;
+neither checker establishes that code is benign.
 
 ### Public response
 
@@ -124,9 +135,13 @@ cross-origin; consumers should fetch the index and ZIP directly.
 4. Configure the `github-pages` environment to permit deployment from `main` only.
 5. Merge a reviewed PR or run the workflow on `main`; inspect the public index.
 
-PR validation uses the validator and tests from the **base SHA**, reading only
+PR validation uses the Python validator and tests from the **base SHA**, reading only
 proposed metadata and inert package bytes from the head. Proposed Python files,
-Wasm, source repositories, install hooks, and build scripts are never executed.
+Wasm, plugin source repositories, install hooks, and plugin build scripts are
+never executed. Separately, CI builds only the pinned official checker source
+with Rust 1.95.0 and `cargo build --locked -p i-wasm-package --features cli
+--bin i-plugin-check`. No submitted plugin source is built. The subprocess reads
+an inert temporary ZIP with no shell; it must succeed before any output is written.
 Changes to validator/workflow policy need a separate maintainer-reviewed PR;
 new policies become effective for subsequent PRs after merging. All actions are
 commit-pinned. No `pull_request_target`, PAT, or application repository access is
