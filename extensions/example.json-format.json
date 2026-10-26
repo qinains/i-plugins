@@ -1,0 +1,15 @@
+{
+  "id": "example.json-format",
+  "name": "JSON formatter",
+  "version": "1.0.0",
+  "description": "Format a workspace JSON file and write the result to a chosen output path. File writes require host approval.",
+  "repository": "https://github.com/qinains/i",
+  "source_revision": "56b591f3d1f15769c16d6455c5ec3d5c7f24f65c",
+  "license": "MIT",
+  "package": {
+    "url": "https://github.com/qinains/i/releases/download/plugins-v1.0.0/example.json-format-1.0.0.hplugin.zip",
+    "sha256": "23f3539caa63c191524fd340f9ec0bf45223712627148c4c465f4b14268bc221",
+    "size": 191763
+  },
+  "permissions": {"workspace": "read-write", "storage": false}
+}

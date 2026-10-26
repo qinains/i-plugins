@@ -1,0 +1,15 @@
+{
+  "id": "example.word-count",
+  "name": "Word count",
+  "version": "1.0.0",
+  "description": "Count words and Unicode characters in a workspace UTF-8 file.",
+  "repository": "https://github.com/qinains/i",
+  "source_revision": "56b591f3d1f15769c16d6455c5ec3d5c7f24f65c",
+  "license": "MIT",
+  "package": {
+    "url": "https://github.com/qinains/i/releases/download/plugins-v1.0.0/example.word-count-1.0.0.hplugin.zip",
+    "sha256": "6f2fdad5124f35486577da488388fd5cc0a7bbdde3f4b0253f9b681f63504b39",
+    "size": 182300
+  },
+  "permissions": {"workspace": "read", "storage": false}
+}
