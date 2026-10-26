@@ -1,6 +1,6 @@
 # i-plugins
 
-Public, pull-request-driven registry for Harness Wasm plugins. Submit metadata,
+Public, pull-request-driven registry for i / lninl browser plugins. Submit metadata,
 pass validation, obtain maintainer review, and merge. GitHub Actions mirrors the
 validated immutable release ZIP and deploys a new catalog to GitHub Pages.
 The app at <https://i.lninl.com/app> reads this catalog without an app rebuild,
@@ -8,7 +8,10 @@ cross-repository token, server, or database.
 
 - Public API: <https://qinains.github.io/i-plugins/index.json>
 - Repository: <https://github.com/qinains/i-plugins>
-- Catalog currently starts empty; this is not a set of preapproved plugins.
+- Browse plugins: <https://i.lninl.com/plugins/>
+- Initial examples: `example.word-count` (workspace read) and
+  `example.json-format` (workspace read/write). Install and grant access explicitly;
+  catalog inclusion is not publisher verification or a security guarantee.
 - Python 3.10+; standard library only. No plugin code is executed during validation.
 
 ## Local verification
